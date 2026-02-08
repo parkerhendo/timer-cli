@@ -55,6 +55,18 @@ timer completions zsh >> ~/.zshrc
 timer completions fish > ~/.config/fish/completions/timer.fish
 ```
 
+## Menu Bar App (macOS)
+
+A SwiftUI menu bar companion app is included in `TimerBar/`.
+
+```sh
+cd TimerBar
+swift build -c release
+open .build/release/TimerBar  # run directly
+```
+
+Requires macOS 13+. Shows current timer status, allows start/stop, and syncs with the CLI via shared database.
+
 ## Data
 
-Frames are stored in SQLite at `~/.local/share/timer-cli/timer.db` (or platform equivalent).
+Frames are stored in SQLite at `~/Library/Application Support/timer-cli/frames.db` (macOS).

@@ -1,7 +1,7 @@
 use anyhow::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
-use crate::frame::{self, Frame};
+use crate::frame::{self, timestamp_to_local, Frame};
 
 pub fn run(conn: &Connection) -> Result<()> {
     if frame::get_current(conn)?.is_some() {
@@ -17,8 +17,6 @@ pub fn run(conn: &Connection) -> Result<()> {
 }
 
 fn get_last_frame(conn: &Connection) -> Result<Option<Frame>> {
-    use chrono::{Local, TimeZone};
-
     conn.query_row(
         "SELECT id, project, start_time, end_time, tags
          FROM frames
@@ -36,8 +34,8 @@ fn get_last_frame(conn: &Connection) -> Result<Option<Frame>> {
             Ok(Frame {
                 id,
                 project,
-                start_time: Local.timestamp_opt(start_ts, 0).unwrap(),
-                end_time: end_ts.map(|ts| Local.timestamp_opt(ts, 0).unwrap()),
+                start_time: timestamp_to_local(start_ts),
+                end_time: end_ts.map(timestamp_to_local),
                 tags: tags_str
                     .map(|s| s.split(',').map(String::from).collect())
                     .unwrap_or_default(),
@@ -47,8 +45,6 @@ fn get_last_frame(conn: &Connection) -> Result<Option<Frame>> {
     .optional()
     .map_err(Into::into)
 }
-
-use rusqlite::OptionalExtension;
 
 fn print_started(frame: &Frame) {
     let tags_str = if frame.tags.is_empty() {

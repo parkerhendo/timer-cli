@@ -1,9 +1,9 @@
 use anyhow::Result;
-use chrono::{Duration, Local, NaiveDate, TimeZone};
+use chrono::{Duration, Local, LocalResult, NaiveDate, TimeZone};
 use rusqlite::Connection;
 use std::collections::HashMap;
 
-use crate::frame::Frame;
+use crate::frame::{timestamp_to_local, Frame};
 
 pub fn run(
     conn: &Connection,
@@ -15,14 +15,8 @@ pub fn run(
     let from_date = from.unwrap_or(today);
     let to_date = to.unwrap_or(today);
 
-    let from_ts = Local
-        .from_local_datetime(&from_date.and_hms_opt(0, 0, 0).unwrap())
-        .unwrap()
-        .timestamp();
-    let to_ts = Local
-        .from_local_datetime(&to_date.and_hms_opt(23, 59, 59).unwrap())
-        .unwrap()
-        .timestamp();
+    let from_ts = date_to_start_timestamp(from_date);
+    let to_ts = date_to_end_timestamp(to_date);
 
     let mut stmt = conn.prepare(
         "SELECT id, project, start_time, end_time, tags
@@ -30,7 +24,7 @@ pub fn run(
          WHERE start_time >= ?1 AND start_time <= ?2",
     )?;
 
-    let frames: Vec<crate::frame::Frame> = stmt
+    let frames: Vec<Frame> = stmt
         .query_map([from_ts, to_ts], |row| {
             let id: i64 = row.get(0)?;
             let project: String = row.get(1)?;
@@ -38,11 +32,11 @@ pub fn run(
             let end_ts: Option<i64> = row.get(3)?;
             let tags_str: Option<String> = row.get(4)?;
 
-            Ok(crate::frame::Frame {
+            Ok(Frame {
                 id,
                 project,
-                start_time: Local.timestamp_opt(start_ts, 0).unwrap(),
-                end_time: end_ts.map(|ts| Local.timestamp_opt(ts, 0).unwrap()),
+                start_time: timestamp_to_local(start_ts),
+                end_time: end_ts.map(timestamp_to_local),
                 tags: tags_str
                     .map(|s| s.split(',').map(String::from).collect())
                     .unwrap_or_default(),
@@ -64,7 +58,25 @@ pub fn run(
     Ok(())
 }
 
-fn print_by_project(frames: &[crate::frame::Frame]) {
+fn date_to_start_timestamp(date: NaiveDate) -> i64 {
+    let dt = date.and_hms_opt(0, 0, 0).unwrap();
+    match Local.from_local_datetime(&dt) {
+        LocalResult::Single(local_dt) => local_dt.timestamp(),
+        LocalResult::Ambiguous(earliest, _) => earliest.timestamp(),
+        LocalResult::None => Local::now().timestamp(),
+    }
+}
+
+fn date_to_end_timestamp(date: NaiveDate) -> i64 {
+    let dt = date.and_hms_opt(23, 59, 59).unwrap();
+    match Local.from_local_datetime(&dt) {
+        LocalResult::Single(local_dt) => local_dt.timestamp(),
+        LocalResult::Ambiguous(_, latest) => latest.timestamp(),
+        LocalResult::None => Local::now().timestamp(),
+    }
+}
+
+fn print_by_project(frames: &[Frame]) {
     let mut totals: HashMap<&str, Duration> = HashMap::new();
 
     for frame in frames {
@@ -83,7 +95,7 @@ fn print_by_project(frames: &[crate::frame::Frame]) {
     println!("Total: {}", Frame::format_duration(grand_total));
 }
 
-fn print_by_tag(frames: &[crate::frame::Frame]) {
+fn print_by_tag(frames: &[Frame]) {
     let mut totals: HashMap<&str, Duration> = HashMap::new();
 
     for frame in frames {

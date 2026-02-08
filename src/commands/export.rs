@@ -1,7 +1,9 @@
 use anyhow::Result;
-use chrono::{Local, TimeZone};
+use chrono::Local;
 use rusqlite::Connection;
 use serde::Serialize;
+
+use crate::frame::timestamp_to_local;
 
 #[derive(Serialize)]
 struct ExportFrame {
@@ -62,8 +64,8 @@ fn query_all_frames(conn: &Connection) -> Result<Vec<ExportFrame>> {
             let end_ts: Option<i64> = row.get(3)?;
             let tags_str: Option<String> = row.get(4)?;
 
-            let start_time = Local.timestamp_opt(start_ts, 0).unwrap();
-            let end_time = end_ts.map(|ts| Local.timestamp_opt(ts, 0).unwrap());
+            let start_time = timestamp_to_local(start_ts);
+            let end_time = end_ts.map(timestamp_to_local);
 
             let duration_seconds = end_time
                 .unwrap_or(now)

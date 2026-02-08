@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveDateTime, TimeZone};
-use rusqlite::{Connection, params};
+use chrono::{Local, LocalResult, NaiveDateTime, TimeZone};
+use rusqlite::{Connection, OptionalExtension, params};
 
 pub fn run(
     conn: &Connection,
@@ -11,11 +11,11 @@ pub fn run(
     end: Option<String>,
 ) -> Result<()> {
     // Verify frame exists
-    let exists: bool = conn.query_row(
-        "SELECT 1 FROM frames WHERE id = ?1",
-        [id],
-        |_| Ok(true),
-    ).unwrap_or(false);
+    let exists: bool = conn
+        .query_row("SELECT 1 FROM frames WHERE id = ?1", [id], |_| Ok(true))
+        .optional()
+        .context("failed to check if frame exists")?
+        .is_some();
 
     if !exists {
         anyhow::bail!("frame {} not found", id);
@@ -49,12 +49,20 @@ fn parse_datetime(s: &str) -> Result<i64> {
     if let Ok(time) = chrono::NaiveTime::parse_from_str(s, "%H:%M") {
         let today = Local::now().date_naive();
         let dt = today.and_time(time);
-        return Ok(Local.from_local_datetime(&dt).unwrap().timestamp());
+        return local_datetime_to_timestamp(&dt);
     }
 
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
-        return Ok(Local.from_local_datetime(&dt).unwrap().timestamp());
+        return local_datetime_to_timestamp(&dt);
     }
 
     anyhow::bail!("expected HH:MM or YYYY-MM-DD HH:MM")
+}
+
+fn local_datetime_to_timestamp(dt: &chrono::NaiveDateTime) -> Result<i64> {
+    match Local.from_local_datetime(dt) {
+        LocalResult::Single(local_dt) => Ok(local_dt.timestamp()),
+        LocalResult::Ambiguous(earliest, _) => Ok(earliest.timestamp()),
+        LocalResult::None => anyhow::bail!("invalid time (may be during DST transition)"),
+    }
 }

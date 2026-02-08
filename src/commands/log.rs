@@ -1,22 +1,16 @@
 use anyhow::Result;
-use chrono::{Local, NaiveDate, TimeZone};
+use chrono::{Local, LocalResult, NaiveDate, TimeZone};
 use rusqlite::Connection;
 
-use crate::frame::Frame;
+use crate::frame::{timestamp_to_local, Frame};
 
 pub fn run(conn: &Connection, from: Option<NaiveDate>, to: Option<NaiveDate>) -> Result<()> {
     let today = Local::now().date_naive();
     let from_date = from.unwrap_or(today);
     let to_date = to.unwrap_or(today);
 
-    let from_ts = Local
-        .from_local_datetime(&from_date.and_hms_opt(0, 0, 0).unwrap())
-        .unwrap()
-        .timestamp();
-    let to_ts = Local
-        .from_local_datetime(&to_date.and_hms_opt(23, 59, 59).unwrap())
-        .unwrap()
-        .timestamp();
+    let from_ts = date_to_start_timestamp(from_date);
+    let to_ts = date_to_end_timestamp(to_date);
 
     let frames = query_frames(conn, from_ts, to_ts)?;
 
@@ -30,6 +24,24 @@ pub fn run(conn: &Connection, from: Option<NaiveDate>, to: Option<NaiveDate>) ->
     }
 
     Ok(())
+}
+
+fn date_to_start_timestamp(date: NaiveDate) -> i64 {
+    let dt = date.and_hms_opt(0, 0, 0).unwrap();
+    match Local.from_local_datetime(&dt) {
+        LocalResult::Single(local_dt) => local_dt.timestamp(),
+        LocalResult::Ambiguous(earliest, _) => earliest.timestamp(),
+        LocalResult::None => Local::now().timestamp(), // fallback
+    }
+}
+
+fn date_to_end_timestamp(date: NaiveDate) -> i64 {
+    let dt = date.and_hms_opt(23, 59, 59).unwrap();
+    match Local.from_local_datetime(&dt) {
+        LocalResult::Single(local_dt) => local_dt.timestamp(),
+        LocalResult::Ambiguous(_, latest) => latest.timestamp(),
+        LocalResult::None => Local::now().timestamp(), // fallback
+    }
 }
 
 fn query_frames(conn: &Connection, from_ts: i64, to_ts: i64) -> Result<Vec<Frame>> {
@@ -51,8 +63,8 @@ fn query_frames(conn: &Connection, from_ts: i64, to_ts: i64) -> Result<Vec<Frame
             Ok(Frame {
                 id,
                 project,
-                start_time: Local.timestamp_opt(start_ts, 0).unwrap(),
-                end_time: end_ts.map(|ts| Local.timestamp_opt(ts, 0).unwrap()),
+                start_time: timestamp_to_local(start_ts),
+                end_time: end_ts.map(timestamp_to_local),
                 tags: tags_str
                     .map(|s| s.split(',').map(String::from).collect())
                     .unwrap_or_default(),

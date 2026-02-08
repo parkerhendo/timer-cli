@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, Local, TimeZone};
+use chrono::{DateTime, Duration, Local, LocalResult, TimeZone};
 use rusqlite::{Connection, OptionalExtension, params};
 
 #[derive(Debug)]
@@ -31,6 +31,22 @@ impl Frame {
     }
 }
 
+/// Safely convert a Unix timestamp to DateTime<Local>.
+/// Uses earliest() to handle DST ambiguity, falls back to UTC interpretation.
+pub fn timestamp_to_local(ts: i64) -> DateTime<Local> {
+    match Local.timestamp_opt(ts, 0) {
+        LocalResult::Single(dt) => dt,
+        LocalResult::Ambiguous(earliest, _) => earliest,
+        LocalResult::None => {
+            // Fallback: interpret as UTC then convert
+            chrono::Utc.timestamp_opt(ts, 0)
+                .single()
+                .map(|dt| dt.with_timezone(&Local))
+                .unwrap_or_else(Local::now)
+        }
+    }
+}
+
 pub fn get_current(conn: &Connection) -> Result<Option<Frame>> {
     conn.query_row(
         "SELECT id, project, start_time, end_time, tags FROM frames WHERE end_time IS NULL",
@@ -45,8 +61,8 @@ pub fn get_current(conn: &Connection) -> Result<Option<Frame>> {
             Ok(Frame {
                 id,
                 project,
-                start_time: Local.timestamp_opt(start_ts, 0).unwrap(),
-                end_time: end_ts.map(|ts| Local.timestamp_opt(ts, 0).unwrap()),
+                start_time: timestamp_to_local(start_ts),
+                end_time: end_ts.map(timestamp_to_local),
                 tags: tags_str
                     .map(|s| s.split(',').map(String::from).collect())
                     .unwrap_or_default(),
