@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-timerbar:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build TimerBar.app
+        run: ./scripts/build-timerbar.sh --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TimerBar-arm64
+          path: TimerBar/TimerBar-arm64.zip
+
+  build-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Build CLI
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: timer-cli-linux
+          path: target/release/timer-cli
+
+  release:
+    needs: [build-timerbar, build-cli]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download TimerBar
+        uses: actions/download-artifact@v4
+        with:
+          name: TimerBar-arm64
+
+      - name: Download CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: timer-cli-linux
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            TimerBar-arm64.zip
+            timer-cli-linux
+          generate_release_notes: true

@@ -1,4 +1,6 @@
 /target
 /TimerBar/.build
 /TimerBar/.swiftpm
+/TimerBar/TimerBar.app
+/TimerBar/*.zip
 /docs
