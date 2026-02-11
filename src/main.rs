@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod frame;
+mod git;
 
 use anyhow::Result;
 use chrono::NaiveDate;
@@ -90,6 +91,12 @@ enum Commands {
         /// Shell to generate completions for
         shell: Shell,
     },
+    /// Sync timer with current git context (project=repo, tag=branch)
+    Switch {
+        /// Suppress output (for shell hooks)
+        #[arg(short, long)]
+        quiet: bool,
+    },
 }
 
 fn parse_tag(s: &str) -> Result<String, String> {
@@ -105,7 +112,7 @@ fn parse_date(s: &str) -> Result<NaiveDate, String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let conn = db::open()?;
+    let mut conn = db::open()?;
 
     match cli.command {
         Commands::Start { project, tags } => commands::start(&conn, &project, &tags),
@@ -127,5 +134,6 @@ fn main() -> Result<()> {
         Commands::Restart => commands::restart(&conn),
         Commands::Export { format } => commands::export(&conn, format),
         Commands::Completions { shell } => commands::completions(shell),
+        Commands::Switch { quiet } => commands::switch(&mut conn, quiet),
     }
 }

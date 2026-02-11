@@ -10,6 +10,7 @@ mod restart;
 mod start;
 mod status;
 mod stop;
+mod switch;
 mod tags;
 
 pub use cancel::run as cancel;
@@ -24,4 +25,5 @@ pub use restart::run as restart;
 pub use start::run as start;
 pub use status::run as status;
 pub use stop::run as stop;
+pub use switch::run as switch;
 pub use tags::run as tags;
