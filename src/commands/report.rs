@@ -10,39 +10,18 @@ pub fn run(
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
     by_tag: bool,
+    all: bool,
 ) -> Result<()> {
-    let today = Local::now().date_naive();
-    let from_date = from.unwrap_or(today);
-    let to_date = to.unwrap_or(today);
-
-    let from_ts = date_to_start_timestamp(from_date);
-    let to_ts = date_to_end_timestamp(to_date);
-
-    let mut stmt = conn.prepare(
-        "SELECT id, project, start_time, end_time, tags
-         FROM frames
-         WHERE start_time >= ?1 AND start_time <= ?2",
-    )?;
-
-    let frames: Vec<Frame> = stmt
-        .query_map([from_ts, to_ts], |row| {
-            let id: i64 = row.get(0)?;
-            let project: String = row.get(1)?;
-            let start_ts: i64 = row.get(2)?;
-            let end_ts: Option<i64> = row.get(3)?;
-            let tags_str: Option<String> = row.get(4)?;
-
-            Ok(Frame {
-                id,
-                project,
-                start_time: timestamp_to_local(start_ts),
-                end_time: end_ts.map(timestamp_to_local),
-                tags: tags_str
-                    .map(|s| s.split(',').map(String::from).collect())
-                    .unwrap_or_default(),
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let frames: Vec<Frame> = if all {
+        query_all_frames(conn)?
+    } else {
+        let today = Local::now().date_naive();
+        let from_date = from.unwrap_or(today);
+        let to_date = to.unwrap_or(today);
+        let from_ts = date_to_start_timestamp(from_date);
+        let to_ts = date_to_end_timestamp(to_date);
+        query_frames(conn, from_ts, to_ts)?
+    };
 
     if frames.is_empty() {
         println!("No frames found");
@@ -74,6 +53,51 @@ fn date_to_end_timestamp(date: NaiveDate) -> i64 {
         LocalResult::Ambiguous(_, latest) => latest.timestamp(),
         LocalResult::None => Local::now().timestamp(),
     }
+}
+
+fn query_frames(conn: &Connection, from_ts: i64, to_ts: i64) -> Result<Vec<Frame>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project, start_time, end_time, tags
+         FROM frames
+         WHERE start_time >= ?1 AND start_time <= ?2",
+    )?;
+
+    let frames = stmt
+        .query_map([from_ts, to_ts], |row| row_to_frame(row))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(frames)
+}
+
+fn query_all_frames(conn: &Connection) -> Result<Vec<Frame>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project, start_time, end_time, tags
+         FROM frames",
+    )?;
+
+    let frames = stmt
+        .query_map([], |row| row_to_frame(row))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(frames)
+}
+
+fn row_to_frame(row: &rusqlite::Row) -> rusqlite::Result<Frame> {
+    let id: i64 = row.get(0)?;
+    let project: String = row.get(1)?;
+    let start_ts: i64 = row.get(2)?;
+    let end_ts: Option<i64> = row.get(3)?;
+    let tags_str: Option<String> = row.get(4)?;
+
+    Ok(Frame {
+        id,
+        project,
+        start_time: timestamp_to_local(start_ts),
+        end_time: end_ts.map(timestamp_to_local),
+        tags: tags_str
+            .map(|s| s.split(',').map(String::from).collect())
+            .unwrap_or_default(),
+    })
 }
 
 fn print_by_project(frames: &[Frame]) {

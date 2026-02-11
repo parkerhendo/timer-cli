@@ -37,6 +37,9 @@ enum Commands {
         /// End date (YYYY-MM-DD)
         #[arg(short, long, value_parser = parse_date)]
         to: Option<NaiveDate>,
+        /// Show all entries (ignore date range)
+        #[arg(short, long)]
+        all: bool,
     },
     /// Cancel (delete) the current frame
     Cancel,
@@ -60,6 +63,9 @@ enum Commands {
         /// Group by tag instead of project
         #[arg(long)]
         by_tag: bool,
+        /// Show all entries (ignore date range)
+        #[arg(short, long)]
+        all: bool,
     },
     /// Edit an existing frame
     Edit {
@@ -118,12 +124,12 @@ fn main() -> Result<()> {
         Commands::Start { project, tags } => commands::start(&conn, &project, &tags),
         Commands::Stop => commands::stop(&conn),
         Commands::Status => commands::status(&conn),
-        Commands::Log { from, to } => commands::log(&conn, from, to),
+        Commands::Log { from, to, all } => commands::log(&conn, from, to, all),
         Commands::Cancel => commands::cancel(&conn),
         Commands::Delete { id } => commands::delete(&conn, id),
         Commands::Projects => commands::projects(&conn),
         Commands::Tags => commands::tags(&conn),
-        Commands::Report { from, to, by_tag } => commands::report(&conn, from, to, by_tag),
+        Commands::Report { from, to, by_tag, all } => commands::report(&conn, from, to, by_tag, all),
         Commands::Edit {
             id,
             project,
