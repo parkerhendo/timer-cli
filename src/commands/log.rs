@@ -4,6 +4,39 @@ use rusqlite::Connection;
 
 use crate::frame::{timestamp_to_local, Frame};
 
+struct DisplayRow {
+    id: String,
+    project: String,
+    tags: String,
+    duration: String,
+    time_range: String,
+}
+
+impl DisplayRow {
+    fn from_frame(frame: &Frame) -> Self {
+        let tags = if frame.tags.is_empty() {
+            String::new()
+        } else {
+            format!("+{}", frame.tags.join(" +"))
+        };
+        let time_range = format!(
+            "{} - {}",
+            frame.start_time.format("%H:%M"),
+            frame
+                .end_time
+                .map(|t| t.format("%H:%M").to_string())
+                .unwrap_or_else(|| "now".to_string())
+        );
+        Self {
+            id: frame.id.to_string(),
+            project: frame.project.clone(),
+            tags,
+            duration: Frame::format_duration(frame.duration()),
+            time_range,
+        }
+    }
+}
+
 pub fn run(conn: &Connection, from: Option<NaiveDate>, to: Option<NaiveDate>, all: bool) -> Result<()> {
     let frames = if all {
         query_all_frames(conn)?
@@ -21,8 +54,23 @@ pub fn run(conn: &Connection, from: Option<NaiveDate>, to: Option<NaiveDate>, al
         return Ok(());
     }
 
-    for frame in frames {
-        print_frame(&frame);
+    // Two-pass: collect display data, then print with alignment
+    let rows: Vec<DisplayRow> = frames.iter().map(DisplayRow::from_frame).collect();
+
+    let max_id = rows.iter().map(|r| r.id.len()).max().unwrap_or(0);
+    let max_project = rows.iter().map(|r| r.project.len()).max().unwrap_or(0);
+    let max_tags = rows.iter().map(|r| r.tags.len()).max().unwrap_or(0);
+    let max_duration = rows.iter().map(|r| r.duration.len()).max().unwrap_or(0);
+
+    for row in &rows {
+        println!(
+            "[{:>id_w$}] {:<proj_w$}  {:<tag_w$}  {:>dur_w$}  {}",
+            row.id, row.project, row.tags, row.duration, row.time_range,
+            id_w = max_id,
+            proj_w = max_project,
+            tag_w = max_tags,
+            dur_w = max_duration,
+        );
     }
 
     Ok(())
@@ -91,25 +139,4 @@ fn row_to_frame(row: &rusqlite::Row) -> rusqlite::Result<Frame> {
             .map(|s| s.split(',').map(String::from).collect())
             .unwrap_or_default(),
     })
-}
-
-fn print_frame(frame: &Frame) {
-    let duration = Frame::format_duration(frame.duration());
-    let tags_str = if frame.tags.is_empty() {
-        String::new()
-    } else {
-        format!(" +{}", frame.tags.join(" +"))
-    };
-    let time_range = format!(
-        "{} - {}",
-        frame.start_time.format("%H:%M"),
-        frame
-            .end_time
-            .map(|t| t.format("%H:%M").to_string())
-            .unwrap_or_else(|| "now".to_string())
-    );
-    println!(
-        "[{}] {}{} ({}) {}",
-        frame.id, frame.project, tags_str, duration, time_range
-    );
 }
