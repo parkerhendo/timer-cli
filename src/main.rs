@@ -31,7 +31,7 @@ enum Commands {
     Status,
     /// Show recent frames
     Log {
-        /// Date or date range (YYYY-MM-DD or MM-DD). One date shows that day, two dates define a range.
+        /// Date or date range (YYYY-MM-DD, MM-DD, today, yesterday). One date shows that day, two dates define a range.
         #[arg(value_parser = parse_date_flexible)]
         dates: Vec<NaiveDate>,
         /// Start date (YYYY-MM-DD)
@@ -119,23 +119,35 @@ fn parse_date(s: &str) -> Result<NaiveDate, String> {
         .map_err(|_| format!("invalid date format, expected YYYY-MM-DD: {s}"))
 }
 
-/// Parse a date that may or may not include a year, using the given fallback year.
-fn parse_date_with_year(s: &str, default_year: i32) -> Result<NaiveDate, String> {
+/// Parse a date string relative to `today`.
+/// Accepts: "today", "yesterday", YYYY-MM-DD, MM-DD, or M-D.
+/// When year is omitted, uses the year from `today`.
+fn parse_date_relative(s: &str, today: NaiveDate) -> Result<NaiveDate, String> {
+    // Relative names
+    match s.to_lowercase().as_str() {
+        "today" => return Ok(today),
+        "yesterday" => {
+            return today
+                .pred_opt()
+                .ok_or_else(|| "cannot represent yesterday".to_string());
+        }
+        _ => {}
+    }
     // Try full date first (YYYY-MM-DD)
     if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         return Ok(d);
     }
     // Try month-day without year (MM-DD or M-D)
+    let default_year = today.year();
     let with_year = format!("{default_year}-{s}");
     NaiveDate::parse_from_str(&with_year, "%Y-%m-%d")
         .or_else(|_| NaiveDate::parse_from_str(&with_year, "%Y-%-m-%-d"))
-        .map_err(|_| format!("invalid date format, expected YYYY-MM-DD or MM-DD: {s}"))
+        .map_err(|_| format!("invalid date format, expected YYYY-MM-DD, MM-DD, today, or yesterday: {s}"))
 }
 
-/// Parse a date that may or may not include a year.
-/// Accepts YYYY-MM-DD, MM-DD, or M-D. When year is omitted, uses the current year.
+/// Entry point for clap's value_parser.
 fn parse_date_flexible(s: &str) -> Result<NaiveDate, String> {
-    parse_date_with_year(s, Local::now().year())
+    parse_date_relative(s, Local::now().date_naive())
 }
 
 fn main() -> Result<()> {
@@ -181,40 +193,68 @@ mod tests {
     use super::*;
     use chrono::NaiveDate;
 
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 3, 15).unwrap()
+    }
+
     #[test]
     fn parse_full_date() {
-        let d = parse_date_with_year("2025-01-15", 2026).unwrap();
+        let d = parse_date_relative("2025-01-15", today()).unwrap();
         assert_eq!(d, NaiveDate::from_ymd_opt(2025, 1, 15).unwrap());
     }
 
     #[test]
     fn parse_month_day_zero_padded() {
-        let d = parse_date_with_year("01-15", 2026).unwrap();
+        let d = parse_date_relative("01-15", today()).unwrap();
         assert_eq!(d, NaiveDate::from_ymd_opt(2026, 1, 15).unwrap());
     }
 
     #[test]
     fn parse_month_day_no_padding() {
-        let d = parse_date_with_year("1-5", 2026).unwrap();
+        let d = parse_date_relative("1-5", today()).unwrap();
         assert_eq!(d, NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
     }
 
     #[test]
     fn parse_month_day_mixed_padding() {
-        let d = parse_date_with_year("1-15", 2026).unwrap();
+        let d = parse_date_relative("1-15", today()).unwrap();
         assert_eq!(d, NaiveDate::from_ymd_opt(2026, 1, 15).unwrap());
     }
 
     #[test]
     fn parse_full_date_ignores_default_year() {
-        let d = parse_date_with_year("2024-12-25", 2026).unwrap();
+        let d = parse_date_relative("2024-12-25", today()).unwrap();
         assert_eq!(d, NaiveDate::from_ymd_opt(2024, 12, 25).unwrap());
     }
 
     #[test]
+    fn parse_today() {
+        let d = parse_date_relative("today", today()).unwrap();
+        assert_eq!(d, today());
+    }
+
+    #[test]
+    fn parse_today_case_insensitive() {
+        let d = parse_date_relative("Today", today()).unwrap();
+        assert_eq!(d, today());
+    }
+
+    #[test]
+    fn parse_yesterday() {
+        let d = parse_date_relative("yesterday", today()).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 3, 14).unwrap());
+    }
+
+    #[test]
+    fn parse_yesterday_case_insensitive() {
+        let d = parse_date_relative("Yesterday", today()).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 3, 14).unwrap());
+    }
+
+    #[test]
     fn parse_invalid_date_returns_error() {
-        assert!(parse_date_with_year("not-a-date", 2026).is_err());
-        assert!(parse_date_with_year("13-32", 2026).is_err());
-        assert!(parse_date_with_year("", 2026).is_err());
+        assert!(parse_date_relative("not-a-date", today()).is_err());
+        assert!(parse_date_relative("13-32", today()).is_err());
+        assert!(parse_date_relative("", today()).is_err());
     }
 }
