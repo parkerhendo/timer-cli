@@ -4,7 +4,7 @@ mod frame;
 mod git;
 
 use anyhow::Result;
-use chrono::NaiveDate;
+use chrono::{Datelike, Local, NaiveDate};
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
@@ -31,6 +31,9 @@ enum Commands {
     Status,
     /// Show recent frames
     Log {
+        /// Date or date range (YYYY-MM-DD or MM-DD). One date shows that day, two dates define a range.
+        #[arg(value_parser = parse_date_flexible)]
+        dates: Vec<NaiveDate>,
         /// Start date (YYYY-MM-DD)
         #[arg(short, long, value_parser = parse_date)]
         from: Option<NaiveDate>,
@@ -116,6 +119,25 @@ fn parse_date(s: &str) -> Result<NaiveDate, String> {
         .map_err(|_| format!("invalid date format, expected YYYY-MM-DD: {s}"))
 }
 
+/// Parse a date that may or may not include a year, using the given fallback year.
+fn parse_date_with_year(s: &str, default_year: i32) -> Result<NaiveDate, String> {
+    // Try full date first (YYYY-MM-DD)
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Ok(d);
+    }
+    // Try month-day without year (MM-DD or M-D)
+    let with_year = format!("{default_year}-{s}");
+    NaiveDate::parse_from_str(&with_year, "%Y-%m-%d")
+        .or_else(|_| NaiveDate::parse_from_str(&with_year, "%Y-%-m-%-d"))
+        .map_err(|_| format!("invalid date format, expected YYYY-MM-DD or MM-DD: {s}"))
+}
+
+/// Parse a date that may or may not include a year.
+/// Accepts YYYY-MM-DD, MM-DD, or M-D. When year is omitted, uses the current year.
+fn parse_date_flexible(s: &str) -> Result<NaiveDate, String> {
+    parse_date_with_year(s, Local::now().year())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut conn = db::open()?;
@@ -124,7 +146,17 @@ fn main() -> Result<()> {
         Commands::Start { project, tags } => commands::start(&conn, &project, &tags),
         Commands::Stop => commands::stop(&conn),
         Commands::Status => commands::status(&conn),
-        Commands::Log { from, to, all } => commands::log(&conn, from, to, all),
+        Commands::Log { dates, from, to, all } => {
+            let (from, to) = match dates.len() {
+                0 => (from, to),
+                1 => (Some(from.unwrap_or(dates[0])), Some(to.unwrap_or(dates[0]))),
+                2 => (Some(from.unwrap_or(dates[0])), Some(to.unwrap_or(dates[1]))),
+                _ => {
+                    anyhow::bail!("too many date arguments (expected at most 2)");
+                }
+            };
+            commands::log(&conn, from, to, all)
+        }
         Commands::Cancel => commands::cancel(&conn),
         Commands::Delete { id } => commands::delete(&conn, id),
         Commands::Projects => commands::projects(&conn),
@@ -141,5 +173,48 @@ fn main() -> Result<()> {
         Commands::Export { format } => commands::export(&conn, format),
         Commands::Completions { shell } => commands::completions(shell),
         Commands::Switch { quiet } => commands::switch(&mut conn, quiet),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    #[test]
+    fn parse_full_date() {
+        let d = parse_date_with_year("2025-01-15", 2026).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2025, 1, 15).unwrap());
+    }
+
+    #[test]
+    fn parse_month_day_zero_padded() {
+        let d = parse_date_with_year("01-15", 2026).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 1, 15).unwrap());
+    }
+
+    #[test]
+    fn parse_month_day_no_padding() {
+        let d = parse_date_with_year("1-5", 2026).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+    }
+
+    #[test]
+    fn parse_month_day_mixed_padding() {
+        let d = parse_date_with_year("1-15", 2026).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2026, 1, 15).unwrap());
+    }
+
+    #[test]
+    fn parse_full_date_ignores_default_year() {
+        let d = parse_date_with_year("2024-12-25", 2026).unwrap();
+        assert_eq!(d, NaiveDate::from_ymd_opt(2024, 12, 25).unwrap());
+    }
+
+    #[test]
+    fn parse_invalid_date_returns_error() {
+        assert!(parse_date_with_year("not-a-date", 2026).is_err());
+        assert!(parse_date_with_year("13-32", 2026).is_err());
+        assert!(parse_date_with_year("", 2026).is_err());
     }
 }
